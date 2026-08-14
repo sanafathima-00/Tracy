@@ -52,12 +52,24 @@
 - [ ] 8.8 Semantic/multi-signature incident correlation (grouping *different* signatures into one incident) — deferred to Gemini/`incident-context`, per this change's own scope split; Phase 3 keeps one signature = one incident, no embeddings or similarity search
 - [ ] 8.9 PostgreSQL-backed `Incident` persistence and the full `DETECTED -> ... -> RESOLVED`/`FAILED` workflow state machine — still deferred, unchanged from `§7`'s and `design.md`'s existing scope; the in-memory `IncidentStore` added here is not a replacement for it, and Phase 3's `Incident` model intentionally omits a `state` field since no code yet exists that could ever transition it
 
+## 9. Gemini intelligence (Phase 4)
+
+- [x] 9.1 `GeminiIncidentAnalysis`/`Hypothesis` Pydantic models (`backend/tracy/gemini.py`, not `models.py` — this is the parsed shape of an external API's response, not a pipeline-internal type like `LogEvent`/`ErrorCluster`/`Incident`). Deliberately omits `severity`, `incident_id`, `suspected_root_cause`, `confidence_overall`, `relevant_commit`/`relevant_files`, `deployment_information`, and `incident_title` — the first group is Tracy-owned deterministic data Gemini must never override, the middle two are meant to be derived later from `hypotheses` (max-confidence entry) rather than asked of Gemini as separate fields it could self-contradict against, and `incident_title` has no slot in `incident-package.schema.json`. `Hypothesis.confidence` is constrained `0.0 <= confidence <= 1.0` via Pydantic.
+- [x] 9.2 `GeminiClient` (`backend/tracy/gemini.py`) — single-shot, synchronous wrapper around `google-genai`'s `client.models.generate_content(..., response_mime_type="application/json", response_schema=GeminiIncidentAnalysis)`, consuming `response.parsed`. Dependency-injectable (`GeminiClient(client=...)`) for tests; no agent/session/tool-calling concepts.
+- [x] 9.3 Bounded input payload (`build_prompt`): exactly the `Incident` plus **one** representative `LogEvent` — never the full log stream, never every matching event. Stack trace capped at 2000 chars (tail-preserving truncation), messages capped at 500 chars.
+- [x] 9.4 Bounded retries (max 3 attempts, 1s/2s backoff) for rate-limit/5xx/network errors only; missing/invalid API key and malformed structured output are treated as non-retryable. A Gemini failure of any kind returns `None` and is logged safely — the deterministic `Incident` `IncidentDetector` already produced remains completely unaffected.
+- [x] 9.5 `backend/tracy/__main__.py` calls `GeminiClient.analyze()` only when `IncidentDetector.check()` returns `is_new=True` — never on repeat occurrences of an already-detected incident, both to avoid alert spam and to conserve free-tier quota. Prints `[AI analysis unavailable]` on failure, the parsed analysis on success.
+- [x] 9.6 `google-genai` added to `backend/pyproject.toml` — the only new dependency this phase; no LangChain/LangGraph/tenacity/python-dotenv/vector DB/agent framework introduced. 22 new tests in `backend/tests/test_gemini.py` (80 total, up from 58), all using a fake injected client — no network access or real API key required by the normal test suite.
+- [ ] 9.7 Full `IncidentPackage` assembly (merging Tracy-owned fields — `error_clusters`, `timeline`, `impact.metric`/`value`, `deployment_information.version` — with Gemini's output into one schema-conformant object) — deferred; this phase produces `GeminiIncidentAnalysis` only, not the assembled package. `IncidentPackage` itself still has no Pydantic model (see `§1.2`).
+- [ ] 9.8 `correlated_events[]`, `related_incident_ids[]`, `deployment_information.deployed_at`/`commit`, `relevant_commit`/`relevant_files`, `documentation_context[]` — still deferred; no evidence source for any of these exists yet (no git access, no deploy pipeline metadata, no post-deployment-verification loop), and Gemini's output model was deliberately built without slots for them so it cannot invent values to fill them.
+- [ ] 9.9 Live Gemini API test — deferred to a manual, human-run smoke test outside the normal `pytest` suite; not part of CI/default test collection.
+
 ## Out of Scope for This Change
 
 The hackathon vertical slice below is the priority once implementation starts; everything else in the six specs (dashboard, historical backfill, additional log sources) is explicitly secondary. None of the following exists as code yet — see `design.md` for the Implemented/Planned/External-dependency/Not-yet-available breakdown per decision:
 
 - FastAPI application, SQLAlchemy models/Alembic migrations (the ingestion-side Pydantic models, `LogEvent`/`ErrorCluster`, now exist — see §7.1)
-- The GCP Cloud Logging / Log Router / Pub/Sub adapter and the `google-genai` Gemini client
+- The GCP Cloud Logging / Log Router / Pub/Sub adapter (the `google-genai` Gemini client now exists — see §9)
 - Postgres-backed orchestrator implementing the `DETECTED` → ... → `RESOLVED`/`FAILED` state machine
 - Any GCP project, IAM role, Pub/Sub topic, or GitHub Copilot enablement (all external dependencies to provision, not build)
 - Next.js/React/Tailwind dashboard

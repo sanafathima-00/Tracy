@@ -9,6 +9,7 @@ description = "Tracy: autonomous production-to-PR engineering system (Phase 2 --
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic",
+    "google-genai",
 ]
 
 [project.optional-dependencies]

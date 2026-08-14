@@ -1,6 +1,6 @@
-# Tracy backend — Phase 2: local log ingestion
+# Tracy backend — local log ingestion, incident detection, and Gemini analysis
 
-Turns raw log lines — today from a local file, later from GCP Pub/Sub — into normalized, deduplicated, clustered records. This phase implements only `LogEvent` and `ErrorCluster`. No GCP, no Gemini, no PostgreSQL, no Codex integration exist in this package yet.
+Turns raw log lines — today from a local file, later from GCP Pub/Sub — into normalized, deduplicated, clustered records (Phase 2), deterministically decides when a cluster is incident-worthy (Phase 3), and asks Gemini to explain a newly-detected incident (Phase 4). No GCP, no PostgreSQL, no Codex integration exist in this package yet.
 
 **This does not depend on `checkout-api/`**, and checkout-api does not depend on this. The only connection is a log file on disk.
 
@@ -23,6 +23,28 @@ pip install -e ".[dev]"
 ```bash
 pytest
 ```
+
+## Gemini analysis (optional)
+
+Once an incident is detected (Phase 3), Tracy can ask Gemini to explain it — a summary, plain-language error explanation, root-cause hypotheses with confidence, and recommended investigation steps. This is entirely optional: **deterministic incident detection works fully without it**, and the normal test suite (`pytest`) never needs a real API key or network access.
+
+To enable it, set `GEMINI_API_KEY` in your shell before running the demo:
+
+**PowerShell:**
+```powershell
+$env:GEMINI_API_KEY="your-key-here"
+```
+
+**bash:**
+```bash
+export GEMINI_API_KEY="your-key-here"
+```
+
+Get a free-tier key from [Google AI Studio](https://aistudio.google.com/) — no Cloud Billing account is required for the free tier.
+
+- **Never commit this key.** It is read from the environment only; nothing in this repository writes it to a file, logs it, or includes it in any Incident/analysis output.
+- If `GEMINI_API_KEY` is not set (or Gemini is unreachable, rate-limited, or returns something that doesn't validate), the demo prints `[AI analysis unavailable]` and continues normally — the deterministic `Incident` it already detected is unaffected either way.
+- Gemini is only called once per *newly*-detected incident, never on repeat occurrences of one already seen — this keeps the demo deterministic and avoids burning free-tier quota on noise.
 
 ## Run the local demo
 
@@ -60,6 +82,18 @@ Note: uvicorn's own access-log line (`INFO:  127.0.0.1:... "POST /checkout HTTP/
 ```
 LocalLogSource ──► RawRecord ──► Pipeline (parse → normalize → sanitize
                                    → LogEvent → deduplicate → ErrorCluster)
+                                        │
+                                        ▼
+                              IncidentDetector (deterministic thresholds)
+                                        │
+                                (Incident, is_new)
+                                        │  only if is_new
+                                        ▼
+                                  GeminiClient.analyze(incident, event)
+                                        │
+                          GeminiIncidentAnalysis | None ("unavailable")
 ```
 
 A future `GCPLogSource` would produce the same `RawRecord` shape (`source="gcp"`) and feed the identical `Pipeline` — only the normalization step gains a GCP-specific branch (currently present as a `NotImplementedError` placeholder in `ingestion/pipeline.py`, so the seam is visible without any `google-cloud-*` import existing anywhere in this package).
+
+Gemini never decides whether an incident exists, its severity, or whether it's a duplicate — `IncidentDetector` already decided all of that deterministically, with no LLM involved, before `GeminiClient` is ever called (see `tracy/detection.py` and `tracy/gemini.py`). A Gemini failure never invalidates the `Incident` it was asked to explain.
