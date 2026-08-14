@@ -1,0 +1,71 @@
+schema: spec-driven
+
+# Project context
+# This is shown to AI when creating artifacts.
+context: |
+  Tracy is an autonomous production-incident-to-resolution system. It observes
+  production signals (initially Google Cloud Logging), builds a structured,
+  evidence-based incident package, and hands it to Codex to investigate,
+  plan, implement, test, and open a pull request. An automated review stage
+  and a mandatory human approval gate sit between the PR and merge. After
+  deployment, Tracy re-observes production to confirm the incident is
+  actually resolved.
+
+  Responsibility split:
+  - Tracy owns: log ingestion/normalization, incident detection and
+    correlation, human-readable incident explanation, and post-deployment
+    verification.
+  - Codex owns: repository investigation, root-cause validation, planning,
+    implementation, tests, and PR creation.
+  - Humans own: the final merge decision. Nothing merges automatically.
+
+  The technology stack is now finalized (see the establish-incident-response-workflow
+  change's design.md for full rationale) — do not propose alternatives to these
+  without an explicit reason tied to a concrete new constraint:
+  - Backend: Python 3.12, FastAPI, Pydantic.
+  - Tracy's AI: Gemini 3.6 Flash via the official `google-genai` SDK. No
+    LangChain/LangGraph, no open-source or local model.
+  - Logs: GCP Cloud Logging -> GCP Log Router -> Pub/Sub for streaming;
+    the Cloud Logging API directly for historical/backfill queries.
+    `google-cloud-logging` and `google-cloud-pubsub` SDKs. Read-only access
+    only — Tracy never gets production write access.
+  - State/orchestration: PostgreSQL via SQLAlchemy + Alembic, orchestrated as
+    an explicit state machine inside FastAPI. No Redis, Kafka, Temporal,
+    Celery, or Airflow.
+  - Codex execution: GitHub Actions running `openai/codex-action`, triggered
+    by Tracy via the GitHub REST API. No manual copy/paste between incident
+    detection and Codex starting work.
+  - PR review: GitHub Copilot's automatic code review. Human approval is
+    still mandatory before merge — nothing merges automatically.
+  - Frontend: Next.js + React + Tailwind CSS, secondary to the backend slice.
+  - Local dev: Docker + Docker Compose, limited to the Tracy API and Postgres.
+  - Tests: pytest, against whatever the repository's own test configuration
+    actually is once it exists.
+  - No vector database (Qdrant/Pinecone/Weaviate/pgvector) at this stage.
+
+  This is a hackathon-scoped build (~2 hours). The priority vertical slice is:
+  GCP logs -> Tracy -> Gemini -> Incident Package -> GitHub Actions -> Codex
+  -> fix -> tests -> PR -> Copilot review -> human approval. Everything else
+  (dashboard polish, historical backfill, additional log sources) is secondary.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

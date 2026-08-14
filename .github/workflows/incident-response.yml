@@ -1,0 +1,87 @@
+# Tracy incident-response workflow.
+#
+# Production path: Tracy calls the GitHub REST API to fire `repository_dispatch`
+# (event_type: tracy-incident) with the Incident Package as `client_payload`.
+# See openspec/specs/codex-handoff/spec.md for the requirement this implements.
+#
+# Manual/dev fallback: `workflow_dispatch` with the Incident Package pasted as a
+# JSON string, for local testing without a live Tracy backend (see the /incident
+# command and codex-handoff's documented-fallback requirement).
+#
+# NOTE: `openai/codex-action`'s inputs below (openai-api-key, prompt,
+# working-directory, permission-profile, output-file) were verified against the
+# action's own repository at the time this workflow was written. The exact set of
+# named `permission-profile` values (":workspace" is used here on the assumption
+# it grants read+write in the checkout, which this job needs to commit and push)
+# was not independently tested in this environment — confirm against the action's
+# current docs before relying on it unattended.
+
+name: Tracy Incident Response
+
+on:
+  repository_dispatch:
+    types: [tracy-incident]
+  workflow_dispatch:
+    inputs:
+      incident_package_json:
+        description: "Incident Package JSON (see openspec/changes/establish-incident-response-workflow/incident-package.schema.json). Manual fallback only — production dispatches via repository_dispatch."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  investigate-and-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Write Incident Package to workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.incident_package_json }}" ]; then
+            printf '%s' '${{ inputs.incident_package_json }}' > incident-package.json
+          else
+            cat > incident-package.json << 'EOF'
+          ${{ toJson(github.event.client_payload) }}
+          EOF
+          fi
+          echo "Incident package written:"
+          cat incident-package.json
+
+      - name: Run Codex — investigate, fix, open PR
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          working-directory: .
+          permission-profile: ":workspace" # verify against openai/codex-action docs — needs read+write to implement and commit a fix
+          prompt: |
+            An Incident Package has been written to ./incident-package.json in this checkout.
+
+            Follow this repository's investigate-incident skill to independently validate
+            the incident's suspected root cause. Never trust the hypothesis blindly.
+
+            If investigation confirms a fix is warranted, follow implement-incident-fix to
+            implement it on an isolated branch, add a regression test, and run the test
+            suite. Then follow create-incident-pr to commit, push, open a PR with a
+            structured incident description, and label it tracy-incident.
+
+            Never commit to main. Never merge. Stop once the PR is open and awaiting
+            GitHub Copilot's automatic review — do not wait for or attempt to consume
+            that review yourself; a separate workflow handles it.
+          output-file: codex-incident-result.md
+
+      - name: Report Codex result
+        if: always()
+        run: |
+          if [ -f codex-incident-result.md ]; then
+            cat codex-incident-result.md
+          else
+            echo "No output file produced by codex-action."
+          fi

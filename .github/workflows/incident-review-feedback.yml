@@ -1,0 +1,64 @@
+# Tracy incident review-remediation workflow.
+#
+# Triggered by GitHub Copilot (or any reviewer) submitting a pull_request_review
+# on a PR opened by the incident-response workflow. Only acts on PRs labeled
+# `tracy-incident` (applied by create-incident-pr) — see
+# openspec/specs/pr-review-workflow/spec.md's "Incident PRs are identifiable"
+# and "Bounded remediation loop" requirements.
+#
+# NOTE: same caveat as incident-response.yml regarding openai/codex-action's
+# permission-profile — not independently verified in this environment.
+
+name: Tracy Incident Review Feedback
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  handle-review:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'tracy-incident')
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Run Codex — classify review, remediate or clear
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          working-directory: .
+          permission-profile: ":workspace" # verify against openai/codex-action docs — needs read+write to push a remediation commit
+          prompt: |
+            This run was triggered by a pull_request_review event on PR
+            #${{ github.event.pull_request.number }} (labeled tracy-incident).
+
+            Follow this repository's review-feedback-loop skill:
+            - Read the review at ${{ github.event.review.html_url }} and the PR's
+              current labels (for the tracy-attempt-N remediation counter).
+            - Classify findings as blocking or non-blocking.
+            - If blocking and under the 3-attempt cap, follow implement-incident-fix
+              to remediate, then commit and push to the same branch.
+            - If blocking and the cap is reached, label the PR human-attention-required
+              and explain why, without attempting another fix.
+            - If clean, label the PR ready-for-human.
+
+            Never merge this PR, regardless of outcome.
+          output-file: codex-review-result.md
+
+      - name: Report Codex result
+        if: always()
+        run: |
+          if [ -f codex-review-result.md ]; then
+            cat codex-review-result.md
+          else
+            echo "No output file produced by codex-action."
+          fi

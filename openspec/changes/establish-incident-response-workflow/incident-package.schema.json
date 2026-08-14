@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tracy.internal/schemas/incident-package.schema.json",
+  "title": "Tracy Incident Package",
+  "description": "The structured, evidence-graded handoff contract between Tracy and Codex. See openspec/specs/incident-context and openspec/specs/codex-handoff for the behavioral requirements this schema implements.",
+  "type": "object",
+  "required": ["incident_id", "schema_version", "severity", "detected_at", "service", "summary", "observed_facts", "confidence_overall"],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Stable unique identifier for this incident. Also the primary key of the Incident row in Tracy's Postgres store; the package itself is a point-in-time snapshot, not the system of record for workflow state (see design.md - Incident vs. Incident Package)."
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.1"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"]
+    },
+    "detected_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "environment": {
+      "type": "string",
+      "description": "e.g. production, staging. No default assumed."
+    },
+    "service": {
+      "type": "string"
+    },
+    "affected_component": {
+      "type": "string"
+    },
+    "impact": {
+      "type": "object",
+      "description": "What observably broke, in measurable terms.",
+      "properties": {
+        "description": { "type": "string" },
+        "metric": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "string",
+      "description": "Human-readable incident summary (see incident-context spec)."
+    },
+    "symptoms": {
+      "type": "array",
+      "description": "Observable symptoms in plain language, distinct from the measured impact metric below.",
+      "items": { "type": "string" }
+    },
+    "error_clusters": {
+      "type": "array",
+      "description": "Deduplicated/aggregated error groups (the ErrorCluster abstraction from production-log-ingestion). Never a raw per-entry log dump.",
+      "items": {
+        "type": "object",
+        "required": ["signature", "count", "first_seen", "last_seen"],
+        "properties": {
+          "signature": { "type": "string", "description": "Stable fingerprint identifying this error group, e.g. a normalized message/stack shape." },
+          "count": { "type": "integer" },
+          "first_seen": { "type": "string", "format": "date-time" },
+          "last_seen": { "type": "string", "format": "date-time" },
+          "sample_message": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "observed_facts": {
+      "type": "array",
+      "description": "Statements the logs directly prove. No inference belongs here.",
+      "items": {
+        "type": "object",
+        "required": ["statement", "evidence"],
+        "properties": {
+          "statement": { "type": "string" },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "log_query_or_reference": { "type": "string" },
+                "timestamp": { "type": "string", "format": "date-time" },
+                "count": { "type": "integer" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "correlated_events": {
+      "type": "array",
+      "description": "Things related in time or context. Never asserted as causal.",
+      "items": {
+        "type": "object",
+        "required": ["description", "timestamp"],
+        "properties": {
+          "description": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "source": { "type": "string", "description": "e.g. deployment log, git, monitoring alert." }
+        },
+        "additionalProperties": false
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp", "event"],
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "event": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "description": "Tracy's suspected root causes. Never treated as fact — see incident-context spec's evidence-tiering requirement.",
+      "items": {
+        "type": "object",
+        "required": ["statement", "confidence"],
+        "properties": {
+          "statement": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "supporting_correlations": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "suspected_root_cause": {
+      "type": "string",
+      "description": "Convenience summary of the leading hypothesis, for display (e.g. a dashboard) without walking the hypotheses array. Must match the highest-confidence entry in hypotheses; never a claim absent from that array."
+    },
+    "confidence_overall": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence in suspected_root_cause. Mirrors the leading hypothesis's confidence."
+    },
+    "deployment_information": {
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "deployed_at": { "type": "string", "format": "date-time" },
+        "commit": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "relevant_commit": {
+      "type": "string"
+    },
+    "relevant_files": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "documentation_context": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to README/docs/specs Tracy judged relevant to this incident."
+    },
+    "recommended_investigation": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "log_references": {
+      "type": "array",
+      "description": "GCP log query strings or links. Never raw log dumps — see production-log-ingestion's aggregation-before-LLM-exposure requirement.",
+      "items": { "type": "string" }
+    },
+    "related_incident_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Set when this incident is a follow-up to a prior one — see post-deployment-verification's loop-closing requirement."
+    }
+  },
+  "additionalProperties": false
+}
