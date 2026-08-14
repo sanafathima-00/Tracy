@@ -1,7 +1,7 @@
 ## 1. Incident Package contract
 
 - [x] 1.1 Publish the Incident Package JSON Schema (`incident-package.schema.json`, now v1.1 with `symptoms`, `error_clusters`, `suspected_root_cause`)
-- [ ] 1.2 Once implemented, promote the schema out of the change directory and mirror it as Pydantic models
+- [ ] 1.2 Once implemented, promote the schema out of the change directory and mirror it as Pydantic models (`LogEvent`/`ErrorCluster`, the ingestion-side building blocks of this schema's `error_clusters`, now exist at `backend/tracy/models.py` — see §7. The `IncidentPackage` model itself, one layer up, is still not implemented.)
 
 ## 2. Codex-facing Skills
 
@@ -31,11 +31,20 @@
 - [x] 6.1 `openspec validate establish-incident-response-workflow --strict` passes
 - [ ] 6.2 Once `production-log-ingestion` produces a real Incident Package via Gemini, re-validate it against `incident-package.schema.json` with actual data, not just the schema's own structural validity
 
+## 7. Local log ingestion (Phase 2)
+
+- [x] 7.1 `LogEvent` and `ErrorCluster` Pydantic models (`backend/tracy/models.py`) — extends design.md's original sketch with `event_id` (dedup) and `source` (multi-source support); `ErrorCluster`'s fields match `incident-package.schema.json`'s `error_clusters[]` shape exactly
+- [x] 7.2 `LogSource` abstraction + `RawRecord` envelope (`backend/tracy/ingestion/base.py`) — the "log source adapter boundary" `production-log-ingestion` requires; no GCP-specific concepts in it
+- [x] 7.3 `LocalLogSource` (`backend/tracy/ingestion/local.py`) — replay mode (deterministic, tests) and follow mode (tails a file checkout-api's stdout is redirected into, like `tail -f`); does not spawn checkout-api and does not require checkout-api to know Tracy exists
+- [x] 7.4 Pipeline (`backend/tracy/ingestion/pipeline.py`): parse → normalize → sanitize → construct `LogEvent` → deduplicate → cluster into `ErrorCluster`, satisfying `production-log-ingestion`'s normalization-before-analysis and aggregation-before-LLM-exposure requirements and `incident-context`'s no-secrets requirement (independently of checkout-api's own sanitization)
+- [x] 7.5 Local demo runner (`backend/tracy/__main__.py`) and 44 passing tests, including an end-to-end test against a fixture and live verification against the real checkout-api regression (repeated triggers correctly increment one `ErrorCluster`'s count)
+- [ ] 7.6 `GCPLogSource` — deferred; the interface (7.2) and the pipeline's `_normalize` dispatch point are already shaped to support it, but no `google-cloud-*` code exists yet
+
 ## Out of Scope for This Change
 
 The hackathon vertical slice below is the priority once implementation starts; everything else in the six specs (dashboard, historical backfill, additional log sources) is explicitly secondary. None of the following exists as code yet — see `design.md` for the Implemented/Planned/External-dependency/Not-yet-available breakdown per decision:
 
-- FastAPI application, Pydantic models, SQLAlchemy models/Alembic migrations
+- FastAPI application, SQLAlchemy models/Alembic migrations (the ingestion-side Pydantic models, `LogEvent`/`ErrorCluster`, now exist — see §7.1)
 - The GCP Cloud Logging / Log Router / Pub/Sub adapter and the `google-genai` Gemini client
 - Postgres-backed orchestrator implementing the `DETECTED` → ... → `RESOLVED`/`FAILED` state machine
 - Any GCP project, IAM role, Pub/Sub topic, or GitHub Copilot enablement (all external dependencies to provision, not build)

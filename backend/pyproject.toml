@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tracy-backend"
+version = "0.1.0"
+description = "Tracy: autonomous production-to-PR engineering system (Phase 2 -- local log ingestion)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+include = ["tracy*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
