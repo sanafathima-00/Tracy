@@ -139,7 +139,7 @@ def checkout(request: CheckoutRequest) -> CheckoutResponse:
             ),
         )
 
-    total_price = calculate_total(product.unit_price, request.quantity)
+    total_price = calculate_total(product.unit_price, request.quantity, product.stock)
 
     charge_payment(request.user_id, total_price)
 
