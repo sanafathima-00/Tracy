@@ -51,7 +51,7 @@ Gemini analyzes the incident and proposes hypotheses.
 
 ## Short Demo
 
-> **Please look into the open PR**
+**Please look into the open PR**
 
 <img width="1535" height="163" alt="image" src="https://github.com/user-attachments/assets/ad634672-de14-4a91-a432-d091e7653309" />
 
