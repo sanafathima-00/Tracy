@@ -433,7 +433,18 @@ jobs:
               f"Incident: {impl.get('incident_id')}\n"
               f"Fix: {impl.get('fix_summary', '')}"
           )
+          # `git add -A` would also stage the three scratch context files
+          # this workflow wrote to the repo root for Codex/this step to
+          # read (incident-package.json, investigation-result.json,
+          # implementation-result.md) -- confirmed by inspecting a real PR:
+          # they ended up committed alongside the actual fix. Stage
+          # everything, then explicitly unstage exactly those three by name
+          # (their content stays on disk -- the "Report"/"Upload artifact"
+          # steps after this one still need to read implementation-result.md;
+          # only the git index is affected).
+          SCRATCH_FILES = ["incident-package.json", "investigation-result.json", "implementation-result.md"]
           subprocess.run(["git", "add", "-A"], check=True)
+          subprocess.run(["git", "reset", "--", *SCRATCH_FILES], check=False)
           subprocess.run(["git", "commit", "-m", commit_message], check=True)
           subprocess.run(["git", "push", "-u", "origin", branch], check=True)
 
