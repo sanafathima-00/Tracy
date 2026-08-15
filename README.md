@@ -3,9 +3,27 @@
 **Tracy** turns a production failure into an **investigated, tested, pull-request-ready code change** — without an engineer manually reading logs, digging through git history, writing the fix, and running tests by hand.
 
 ```text
-Production Error → Log Ingestion → Incident Detection → Gemini Analysis
-→ Validated Incident Package → GitHub → Codex Investigation
-→ Root Cause Validation → Implementation → Tests → Pull Request
+Production Error
+      ↓
+Log Ingestion
+      ↓
+Incident Detection
+      ↓
+Gemini Analysis
+      ↓
+Validated Incident Package
+      ↓
+GitHub
+      ↓
+Codex Investigation
+      ↓
+Root Cause Validation
+      ↓
+Implementation
+      ↓
+Tests
+      ↓
+Pull Request
 ```
 
 **Core principle: Gemini does not get the final say.** Gemini analyzes the incident and proposes hypotheses. Codex then independently investigates those hypotheses against the actual repository — reading source, tests, config, docs, and git history — before touching any code. A hypothesis is a claim to verify, not a fact.
@@ -33,12 +51,35 @@ The demo uses an intentional `ZeroDivisionError` in the checkout service. When t
 ### The Demo Flow
 
 ```text
-POST /checkout (product_id=prod-003, quantity=5) → HTTP 500
-→ Tracy detects the error → same error occurs again → ErrorCluster count=2
-→ Incident created → Gemini analyzes the evidence → Incident Package generated
-→ GitHub repository_dispatch → Codex investigates the repository
-→ Root cause independently validated → Codex implements the fix
-→ Tests run → Pull Request created
+POST /checkout
+product_id = prod-003
+quantity = 5
+        ↓
+HTTP 500
+        ↓
+Tracy detects the error
+        ↓
+Same error occurs again
+        ↓
+ErrorCluster count = 2
+        ↓
+Incident created
+        ↓
+Gemini analyzes the evidence
+        ↓
+Incident Package generated
+        ↓
+GitHub repository_dispatch
+        ↓
+Codex investigates the repository
+        ↓
+Root cause independently validated
+        ↓
+Codex implements the fix
+        ↓
+Tests run
+        ↓
+Pull Request created
 ```
 
 ### What It Shows
