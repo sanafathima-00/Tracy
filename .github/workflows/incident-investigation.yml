@@ -7,9 +7,9 @@
 # Codex (read-only) -> investigate-incident -> a structured investigation
 # result. Codex has no ability to modify files, commit, push, or open a PR
 # in this workflow -- that capability boundary is enforced by GitHub Actions
-# permissions and codex-action's own permission-profile/safety-strategy, not
-# merely by prompt wording (see the security notes below and this phase's
-# analysis in openspec/changes/establish-incident-response-workflow/tasks.md).
+# permissions and codex-action's own permission-profile, not merely by prompt
+# wording (see the security notes below and this phase's analysis in
+# openspec/changes/establish-incident-response-workflow/tasks.md).
 #
 # Production path: Tracy calls the GitHub REST API's repository_dispatch
 # endpoint (event_type: tracy-investigate) with an IncidentPackage wrapped
@@ -29,9 +29,13 @@
 #   "Codex can view files but cannot mutate the filesystem or access the
 #   network directly." This is the primary control that makes this
 #   investigation genuinely read-only -- not the prompt wording below.
-# - safety-strategy "read-only" is a second, independent axis ("permission
-#   profiles constrain commands Codex runs; they do not replace the
-#   action's safety-strategy") -- both are set, deliberately redundant.
+# - safety-strategy is deliberately left unset (defaults to "drop-sudo").
+#   Confirmed against the action's current documentation: safety-strategy:
+#   "read-only" cannot be combined with permission-profile -- that strategy
+#   forces the action's own legacy read-only sandbox instead, which conflicts
+#   with an explicit permission-profile selection. permission-profile
+#   ":read-only" alone is the correct, current way to get a read-only sandbox
+#   when a permission profile is in use.
 # - actions/checkout defaults to fetch-depth: 1 (single commit) and
 #   persist-credentials: true. Both defaults are overridden below:
 #   fetch-depth: 0 because investigate-incident explicitly needs git log/
@@ -101,7 +105,11 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           working-directory: .
           permission-profile: ":read-only" # mandatory for this phase -- Codex cannot mutate the filesystem or reach the network
-          safety-strategy: "read-only" # independent axis from permission-profile; both point the same direction deliberately
+          # safety-strategy intentionally omitted: defaults to "drop-sudo".
+          # "read-only" cannot be combined with permission-profile (verified
+          # against the action's current docs -- it forces the legacy
+          # read-only sandbox instead, which conflicts with a profile
+          # selection). permission-profile ":read-only" alone is sufficient.
           prompt: |
             You are investigating a production incident.
 
