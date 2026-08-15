@@ -38,6 +38,19 @@
 #   NOT set to "read-only", which cannot be combined with any
 #   permission-profile (confirmed the hard way during Phase 5A: that
 #   combination is rejected before Codex even starts).
+# - CONFIRMED BY A REAL LIVE RUN (not assumed): even under ":workspace",
+#   Codex's sandbox keeps `.git` read-only -- a first live attempt at this
+#   workflow had Codex correctly re-verify the root cause, then report
+#   `git switch -c codex/incident/<id>` failed because ".git is read-only",
+#   and stop safely with no files changed, no commit, no PR (exactly the
+#   safe failure mode this design wants when something prevents proceeding).
+#   ":workspace" grants writes to ordinary working-tree files, not git refs.
+#   This workflow is therefore structured so Codex ONLY edits files and
+#   reports what it did; branch creation happens in a `run:` step BEFORE
+#   Codex runs, and committing/pushing/PR-opening happens in a `run:` step
+#   AFTER Codex runs -- both using the runner's own un-sandboxed git/gh,
+#   authenticated via the checkout-persisted token. Codex is explicitly told
+#   not to attempt git operations itself.
 # - permissions: contents: write + pull-requests: write + issues: write.
 #   issues: write is required, not incidental: GitHub's REST API applies
 #   labels to a PR through the Issues API (PRs are a superset of issues in
@@ -51,10 +64,11 @@
 #   actions/checkout persists by default. That token is scoped to exactly
 #   the permissions: block above for the lifetime of this one job -- not a
 #   long-lived credential, not exposed beyond this job.
-# - GH_TOKEN is exported for the Codex step specifically (not job-wide) so
-#   that if Codex's shell tooling invokes the `gh` CLI (e.g. `gh pr create`,
-#   as create-incident-pr's skill describes), it is already authenticated
-#   without a separate secret being introduced.
+# - GH_TOKEN is exported only for the post-Codex "Commit, push, and open PR"
+#   step -- not for the Codex step itself, which never needs it (Codex is
+#   explicitly told not to touch git/gh; see the .git-read-only note above).
+#   Least privilege: Codex's own step gets no GitHub-authenticated token at
+#   all, since it has no legitimate use for one under this design.
 # - Both the Incident Package and the Investigation Result are written to
 #   files via intermediate `env:` variables, never interpolated directly
 #   into `run:` script text -- same script-injection mitigation as Phase 5A.
@@ -169,12 +183,26 @@ jobs:
           fi
           echo "GATE PASSED: implementation is authorized to proceed."
 
-      - name: Run Codex — implement, test, open PR
+      - name: Create isolated incident branch
+        id: branch
+        run: |
+          set -euo pipefail
+          INCIDENT_ID=$(jq -r '.incident_id' incident-package.json)
+          if [ -z "$INCIDENT_ID" ] || [ "$INCIDENT_ID" = "null" ]; then
+            echo "incident-package.json has no incident_id -- cannot name a branch." >&2
+            exit 1
+          fi
+          BRANCH="codex/incident/$INCIDENT_ID"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "Created and checked out $BRANCH"
+
+      - name: Run Codex — implement and test (does not commit/push/open a PR itself)
         id: codex
         if: success()
         uses: openai/codex-action@v1
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # so `gh pr create` (per create-incident-pr) is already authenticated
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           working-directory: .
@@ -185,6 +213,18 @@ jobs:
           prompt: |
             You are implementing a fix for a production incident that has
             already been independently investigated and gate-authorized.
+
+            You are ALREADY on a dedicated branch (created by this workflow
+            before you started) -- do not create another branch, do not
+            switch branches, and never commit directly to main.
+
+            IMPORTANT SANDBOX LIMIT: your permission profile allows editing
+            ordinary files but keeps .git read-only. You CANNOT run git
+            commit, git push, or `gh pr create` yourself -- do not attempt
+            them; they will fail. A separate workflow step, after you finish,
+            handles committing, pushing, and opening the PR, using the
+            files_changed/fix_summary/tests you report below. Your job ends
+            once you've implemented and tested the fix and reported the JSON.
 
             Two files are in this checkout:
             - ./incident-package.json — Tracy's deterministic Incident Package
@@ -217,13 +257,13 @@ jobs:
 
             Once you've independently confirmed the root cause:
 
-            1. Read `incident_id` from ./incident-package.json yourself, then
-               create a dedicated branch named exactly `codex/incident/<that incident_id>`
-               — verify your current branch and working tree state first, and
-               never commit directly to main.
-            2. Follow this repository's implement-incident-fix skill
-               (.agents/skills/implement-incident-fix/SKILL.md).
-            3. Decide — independently, not by copying investigation-result.json's
+            1. Follow this repository's implement-incident-fix skill
+               (.agents/skills/implement-incident-fix/SKILL.md) for the
+               implementation steps below, but ignore its instructions about
+               branch creation and about committing/pushing/opening a PR --
+               this run's branch/commit/PR handling is entirely delegated to
+               the workflow, per the sandbox limit above.
+            2. Decide — independently, not by copying investigation-result.json's
                planning_path verbatim without judgment — whether this fix needs
                a full OpenSpec change or is a genuinely small, lightweight,
                localized fix that changes no documented requirement. If
@@ -233,38 +273,28 @@ jobs:
                or update the appropriate change before implementing. Do not
                create OpenSpec ceremony for a fix that is genuinely small and
                changes no documented behavior.
-            4. Implement the smallest correct fix for the confirmed root
+            3. Implement the smallest correct fix for the confirmed root
                cause. Never modify unrelated code, OpenSpec files unrelated to
                this fix, or any workflow file under .github/workflows/.
-            5. Add a regression test that fails without your fix and passes
+            4. Add a regression test that fails without your fix and passes
                with it.
-            6. Run the relevant tests, then the full relevant test suites
+            5. Run the relevant tests, then the full relevant test suites
                (this repository has backend/ and checkout-api/, each with
                their own pytest configuration — use what the repository
                actually defines, do not invent a test command).
-            7. Verify the original incident condition is actually fixed, not
+            6. Verify the original incident condition is actually fixed, not
                just that tests pass in isolation.
-            8. Check your own git diff carefully before proceeding — it must
+            7. Check your own git diff carefully before finishing — it must
                contain only what the confirmed root cause and its fix
                require. Flag, do not silently include, anything broader.
-            9. Only once implementation and tests succeed, follow this
-               repository's create-incident-pr skill
-               (.agents/skills/create-incident-pr/SKILL.md) exactly: commit,
-               push your branch, open the PR with a structured description
-               (incident summary, validated root cause with evidence, files
-               changed, fix explanation, tests run, OpenSpec status,
-               limitations), and label it `tracy-incident` — this label is
-               required for the existing, separate incident-review-feedback.yml
-               workflow to ever pick up review findings on this PR later.
-               Never merge. Never request review manually — GitHub Copilot's
-               automatic review (if enabled on this repository) runs on its
-               own.
 
             If at any point your independent verification refutes the
             investigation result, or the fix cannot be completed correctly,
-            or tests cannot be made to pass: STOP, make no further changes,
-            and report exactly why — do not open a PR for an unverified or
-            incomplete fix.
+            or tests cannot be made to pass: STOP, make no further file
+            changes, and report exactly why via the JSON contract below --
+            the workflow will not commit or open a PR unless
+            implementation_status is "implemented" and files were actually
+            changed.
 
             End your final message with a fenced JSON code block in exactly
             this shape:
@@ -280,12 +310,95 @@ jobs:
               "openspec_status": "not_required|created:<change-name>|updated:<change-name>",
               "root_cause": "...",
               "fix_summary": "...",
-              "pr_url": "... or null if no PR was opened",
+              "pr_url": null,
               "review_iterations": 0,
               "failure_reason": "... or null"
             }
             ```
+
+            Leave `pr_url` null and `review_iterations` 0 -- you never open a
+            PR yourself; the workflow fills `pr_url` in afterward once it has
+            actually opened one.
           output-file: implementation-result.md
+
+      - name: Commit, push, and open PR (only if Codex actually implemented a fix)
+        if: always()
+        shell: python
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+        run: |
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          if not os.path.exists("implementation-result.md"):
+              print("No implementation-result.md -- Codex did not complete (see the prior step). Nothing to commit.")
+              sys.exit(0)
+
+          text = open("implementation-result.md", encoding="utf-8").read()
+          match = re.search(r"```json\n(.*?)\n```", text, re.DOTALL)
+          if not match:
+              print("implementation-result.md has no fenced JSON block -- cannot determine status. Nothing to commit.")
+              sys.exit(0)
+
+          impl = json.loads(match.group(1))
+          status = impl.get("implementation_status")
+          print(f"implementation_status: {status}")
+
+          if status != "implemented":
+              print(f"Codex reported implementation_status={status!r} -- not opening a PR.")
+              sys.exit(0)
+
+          diff = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
+          if not diff.stdout.strip():
+              print("Codex reported 'implemented' but no file changes are present -- refusing to open a PR for an empty diff.")
+              sys.exit(0)
+
+          branch = os.environ["BRANCH"]
+          incident = json.load(open("incident-package.json", encoding="utf-8"))
+          investigation = json.load(open("investigation-result.json", encoding="utf-8"))
+
+          # subprocess.run([...]) with an argument list -- never a shell string
+          # -- so nothing in fix_summary/summary/root_cause (all untrusted
+          # evidence/model output) is ever interpreted by a shell, regardless
+          # of its content.
+          commit_message = (
+              f"fix: {(impl.get('root_cause') or incident.get('summary') or 'incident fix')[:72]}\n\n"
+              f"Incident: {impl.get('incident_id')}\n"
+              f"Fix: {impl.get('fix_summary', '')}"
+          )
+          subprocess.run(["git", "add", "-A"], check=True)
+          subprocess.run(["git", "commit", "-m", commit_message], check=True)
+          subprocess.run(["git", "push", "-u", "origin", branch], check=True)
+
+          body_lines = [
+              "## Incident summary", incident.get("summary", ""), "",
+              "## Validated root cause", investigation.get("validated_root_cause", ""), "",
+              "## Evidence",
+          ]
+          body_lines += [f"- {e}" for e in investigation.get("root_cause_evidence", [])]
+          body_lines += ["", "## Files changed"]
+          body_lines += [f"- {f}" for f in impl.get("files_changed", [])] or ["(none reported)"]
+          body_lines += ["", "## Fix", impl.get("fix_summary", ""), "", "## Tests run"]
+          body_lines += [f"- {t}" for t in impl.get("tests", [])] or ["(none reported)"]
+          body_lines += ["", "## OpenSpec status", impl.get("openspec_status", "not_required")]
+          if impl.get("failure_reason"):
+              body_lines += ["", "## Limitations", impl["failure_reason"]]
+          body = "\n".join(body_lines)
+
+          title = f"fix: {(impl.get('fix_summary') or 'automated incident fix')[:70]}"
+
+          result = subprocess.run(
+              ["gh", "pr", "create", "--title", title, "--body", body, "--label", "tracy-incident", "--base", "main", "--head", branch],
+              capture_output=True, text=True,
+          )
+          print(result.stdout)
+          if result.returncode != 0:
+              print(result.stderr, file=sys.stderr)
+          result.check_returncode()
 
       - name: Report implementation result
         if: always()
