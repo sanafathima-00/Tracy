@@ -51,10 +51,17 @@ Gemini analyzes the incident and proposes hypotheses.
 
 ## Short Demo
 
+> **Please look into the open PR**
+
 <img width="1535" height="163" alt="image" src="https://github.com/user-attachments/assets/ad634672-de14-4a91-a432-d091e7653309" />
 
 <img width="806" height="842" alt="image" src="https://github.com/user-attachments/assets/047ee162-5efc-4018-aaaa-51e2ec2b6b9a" />
 
+<img width="565" height="639" alt="image" src="https://github.com/user-attachments/assets/a081ea7c-5dad-4149-a981-114061072595" />
+
+<img width="576" height="255" alt="image" src="https://github.com/user-attachments/assets/201cecc0-ba3b-4bf4-b76b-d331026fea3c" />
+
+---
 
 ### The Problem
 
