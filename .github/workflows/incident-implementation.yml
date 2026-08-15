@@ -454,6 +454,19 @@ jobs:
 
           title = f"fix: {(impl.get('fix_summary') or 'automated incident fix')[:70]}"
 
+          # A first attempt at this failed here: `could not add label:
+          # 'tracy-incident' not found' -- gh pr create requires the label
+          # to already exist, and nothing had ever created it on a freshly
+          # created repository. --force makes this idempotent: creates the
+          # label if absent, harmlessly updates it if already present.
+          # incident-review-feedback.yml depends on this exact label existing
+          # to find its PRs later.
+          subprocess.run(
+              ["gh", "label", "create", "tracy-incident", "--color", "d73a4a",
+               "--description", "Automated Tracy incident fix -- see review-feedback-loop", "--force"],
+              capture_output=True, text=True,
+          )
+
           result = subprocess.run(
               ["gh", "pr", "create", "--title", title, "--body", body, "--label", "tracy-incident", "--base", "main", "--head", branch],
               capture_output=True, text=True,
