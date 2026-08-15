@@ -51,6 +51,11 @@ Gemini analyzes the incident and proposes hypotheses.
 
 ## Short Demo
 
+<img width="1535" height="163" alt="image" src="https://github.com/user-attachments/assets/ad634672-de14-4a91-a432-d091e7653309" />
+
+<img width="806" height="842" alt="image" src="https://github.com/user-attachments/assets/047ee162-5efc-4018-aaaa-51e2ec2b6b9a" />
+
+
 ### The Problem
 
 The demo uses an intentional `ZeroDivisionError` in the checkout service.
