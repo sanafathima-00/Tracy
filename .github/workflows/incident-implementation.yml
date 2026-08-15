@@ -199,6 +199,26 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "Created and checked out $BRANCH"
 
+      # A first live run confirmed Codex's :workspace sandbox has no network
+      # access (it could not `pip install pytest` itself), so it correctly
+      # refused to claim tests passed and reported implementation_status:
+      # "failed" rather than fabricate a result -- exactly the honesty
+      # implement-incident-fix's skill requires, but not a usable outcome.
+      # Fix: install test dependencies here, at the workflow level (ordinary,
+      # unrestricted network access, ordinary CI hygiene) -- Codex's sandbox
+      # can then RUN pytest without needing network access to fetch it.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend and checkout-api test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e "./backend[dev]"
+          pip install -e "./checkout-api[dev]"
+
       - name: Run Codex — implement and test (does not commit/push/open a PR itself)
         id: codex
         if: success()
