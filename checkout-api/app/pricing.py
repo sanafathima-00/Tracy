@@ -11,5 +11,6 @@ def calculate_total(unit_price: float, quantity: int, remaining_stock: int) -> f
         total *= 1 - BULK_DISCOUNT_RATE
     else:
         remaining_after_purchase = remaining_stock - quantity
-        total *= 1 - (CLEARANCE_DISCOUNT_RATE / remaining_after_purchase)
+        clearance_divisor = max(1, remaining_after_purchase)
+        total *= 1 - (CLEARANCE_DISCOUNT_RATE / clearance_divisor)
     return round(total, 2)
